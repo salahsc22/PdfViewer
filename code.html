@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced PDF Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #4f46e5;
+            --secondary-color: #f43f5e;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            overflow-x: hidden;
+        }
+        
+        .pdf-container {
+            position: relative;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            background-color: white;
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+        
+        .pdf-toolbar {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .canvas-wrapper {
+            overflow: auto;
+            border: 1px solid #e2e8f0;
+            position: relative;
+        }
+        
+        .page-container {
+            position: relative;
+            margin: 0 auto;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-bottom: 1rem;
+        }
+        
+        .annotation-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .annotation {
+            position: absolute;
+            border: 2px dashed var(--secondary-color);
+            background-color: rgba(244, 63, 94, 0.2);
+            pointer-events: auto;
+            cursor: move;
+        }
+        
+        .annotation.active {
+            border-style: solid;
+            z-index: 100;
+        }
+        
+        .sidebar {
+            transition: all 0.3s ease;
+            background-color: white;
+            box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                right: -100%;
+                top: 0;
+                height: 100%;
+                width: 80%;
+                z-index: 1000;
+            }
+            
+            .sidebar.open {
+                right: 0;
+            }
+        }
+        
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+        
+        .sidebar-overlay.open {
+            display: block;
+        }
+        
+        .tool-btn {
+            transition: all 0.2s ease;
+        }
+        
+        .tool-btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .download-btn {
+            background: linear-gradient(135deg, var(--primary-color), #7c3aed);
+        }
+        
+        #pdf-progress {
+            height: 4px;
+            background-color: #e2e8f0;
+        }
+        
+        #pdf-progress-bar {
+            height: 100%;
+            background-color: var(--primary-color);
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="flex flex-col min-h-screen">
+        <!-- Header -->
+        <header class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg">
+            <div class="container mx-auto px-4 py-6">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center space-x-4">
+                        <img src="https://placehold.co/40x40" alt="PDF Editor Logo - A stylized document with pen icon" class="h-10 w-10 rounded-full">
+                        <h1 class="text-2xl font-bold">PDF Editor Pro</h1>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <button id="menu-btn" class="md:hidden text-white">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="flex flex-1 overflow-hidden">
+            <div class="flex flex-1 flex-col md:flex-row">
+                <!-- Sidebar -->
+                <div id="sidebar" class="sidebar w-64 bg-white p-4">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-lg font-semibold text-gray-800">Tools</h2>
+                        <button id="close-sidebar" class="md:hidden text-gray-500">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <div class="tool-btn bg-gray-100 hover:bg-gray-200 p-3 rounded-lg cursor-pointer transition duration-200 flex items-center space-x-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            <span>Import PDF</span>
+                        </div>
+                        
+                        <div class="tool-btn bg-gray-100 hover:bg-gray-200 p-3 rounded-lg cursor-pointer transition duration-200 flex items-center space-x-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                            </svg>
+                            <span>Export PDF</span>
+                        </div>
+                        
+                        <div class="tool-btn bg-gray-100 hover:bg-gray-200 p-3 rounded-lg cursor-pointer transition duration-200 flex items-center space-x-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                            </svg>
+                            <span>Add Page</span>
+                        </div>
+                        
+                        <div class="tool-btn bg-gray-100 hover:bg-gray-200 p-3 rounded-lg cursor-pointer transition duration-200 flex items-center space-x-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span>Delete Page</span>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-8">
+                        <h3 class="text-md font-semibold text-gray-800 mb-3">Annotations</h3>
+                        <div class="space-y-3">
+                            <div class="tool-btn bg-gray-100 hover:bg-gray-200 p-3 rounded-lg cursor-pointer transition duration-200 flex items-center space-x-3" data-tool="text">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <span>Add Text</span>
+                            </div>
+                            
+                            <div class="tool-btn bg-gray-100 hover:bg-gray-200 p-3 rounded-lg cursor-pointer transition duration-200 flex items-center space-x-3" data-tool="highlight">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                                <span>Highlight</span>
+                            </div>
+                            
+                            <div class="tool-btn bg-gray-100 hover:bg-gray-200 p-3 rounded-lg cursor-pointer transition duration-200 flex items-center space-x-3" data-tool="rectangle">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                                </svg>
+                                <span>Rectangle</span>
+                            </div>
+                            
+                            <div class="tool-btn bg-gray-100 hover:bg-gray-200 p-3 rounded-lg cursor-pointer transition duration-200 flex items-center space-x-3" data-tool="circle">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                </svg>
+                                <span>Circle</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-8">
+                        <h3 class="text-md font-semibold text-gray-800 mb-3">Properties</h3>
+                        <div id="properties-panel" class="bg-gray-50 p-4 rounded-lg">
+                            <p class="text-sm text-gray-500 text-center">Select an element to edit properties</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Overlay for mobile sidebar -->
+                <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+                <!-- Main PDF Viewer Area -->
+                <div class="flex-1 p-4 overflow-auto">
+                    <div class="max-w-6xl mx-auto">
+                        <!-- PDF Toolbar -->
+                        <div class="pdf-toolbar rounded-t-lg mb-2 flex justify-between items-center">
+                            <div class="flex items-center space-x-4">
+                                <button id="prev-page" class="text-white hover:bg-indigo-700 p-2 rounded">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                </button>
+                                
+                                <span id="page-num" class="text-white">Page: <span id="current-page">1</span> of <span id="total-pages">0</span></span>
+                                
+                                <button id="next-page" class="text-white hover:bg-indigo-700 p-2 rounded">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                    </svg>
+                                </button>
+                                
+                                <div class="flex items-center">
+                                    <input type="number" id="page-selector" min="1" class="w-12 px-2 py-1 rounded-l bg-indigo-500 text-white border-0 focus:ring-2 focus:ring-indigo-300" value="1">
+                                    <button id="go-to-page" class="bg-indigo-700 px-2 py-1 rounded-r text-white">Go</button>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-center space-x-2">
+                                <button id="zoom-out" class="text-white hover:bg-indigo-700 p-2 rounded">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+                                    </svg>
+                                </button>
+                                
+                                <span id="zoom-level" class="text-white">100%</span>
+                                
+                                <button id="zoom-in" class="text-white hover:bg-indigo-700 p-2 rounded">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                    </svg>
+                                </button>
+                                
+                                <button id="fit-to-width" class="text-white hover:bg-indigo-700 px-3 py-1 rounded text-sm">
+                                    Fit Width
+                                </button>
+                                
+                                <button id="sidebar-toggle" class="text-white hover:bg-indigo-700 p-2 rounded md:hidden">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- PDF Progress Bar -->
+                        <div id="pdf-progress" class="h-1 bg-gray-200 rounded-full mb-4">
+                            <div id="pdf-progress-bar" class="h-full bg-indigo-600 rounded-full" style="width: 0%"></div>
+                        </div>
+                        
+                        <!-- PDF Canvas Container -->
+                        <div class="pdf-container">
+                            <div id="pdf-viewer" class="canvas-wrapper relative">
+                                <!-- PDF pages will be rendered here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Page Navigation -->
+                        <div class="flex justify-between items-center mt-4">
+                            <button id="prev-bottom" class="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-4 border border-gray-300 rounded-lg shadow">
+                                Previous Page
+                            </button>
+                            
+                            <div class="flex space-x-2">
+                                <button id="download-pdf" class="download-btn hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg shadow flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                    Download PDF
+                                </button>
+                                
+                                <button id="print-pdf" class="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-4 border border-gray-300 rounded-lg shadow flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                    </svg>
+                                    Print
+                                </button>
+                            </div>
+                            
+                            <button id="next-bottom" class="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-4 border border-gray-300 rounded-lg shadow">
+                                Next Page
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Initialize PDF.js
+        pdfjsLib.getDocument('https://arxiv.org/pdf/2103.15850.pdf').promise.then(function(pdf) {
+            window.pdfDoc = pdf;
+            document.getElementById('total-pages').textContent = pdf.numPages;
+            
+            // Render the first page
+            renderPage(pdf, 1);
+            
+            // Update progress bar as pages load
+            pdf.getMetadata().then(function(metadata) {
+                console.log('PDF loaded:', metadata);
+                
+                let loadedPages = 0;
+                const updateProgress = function() {
+                    loadedPages++;
+                    const progress = (loadedPages / pdf.numPages) * 100;
+                    document.getElementById('pdf-progress-bar').style.width = `${progress}%`;
+                    
+                    if (loadedPages === pdf.numPages) {
+                        document.getElementById('pdf-progress').style.opacity = '0';
+                    }
+                };
+                
+                // Pre-render adjacent pages for faster navigation
+                const preRenderPages = function() {
+                    const currentPage = parseInt(document.getElementById('current-page').textContent);
+                    const pagesToPreRender = [currentPage, currentPage + 1, currentPage - 1]
+                        .filter(p => p >= 1 && p <= pdf.numPages);
+                    
+                    pagesToPreRender.forEach(function(pageNum) {
+                        if (!document.getElementById(`page-${pageNum}`)) {
+                            renderPage(pdf, pageNum).then(updateProgress);
+                        }
+                    });
+                };
+                
+                preRenderPages();
+            });
+        }).catch(function(error) {
+            console.error('Error loading PDF:', error);
+        });
+        
+        // Render a PDF page
+        function renderPage(pdf, pageNum) {
+            return pdf.getPage(pageNum).then(function(page) {
+                const scale = 1.5;
+                const viewport = page.getViewport({ scale: scale });
+                
+                // Set up canvas
+                const canvas = document.createElement('canvas');
+                canvas.id = `page-canvas-${pageNum}`;
+                canvas.className = 'page-canvas';
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                // Create page container
+                const pageContainer = document.createElement('div');
+                pageContainer.id = `page-${pageNum}`;
+                pageContainer.className = 'page-container';
+                pageContainer.style.width = `${viewport.width}px`;
+                pageContainer.style.height = `${viewport.height}px`;
+                
+                // Create annotation layer
+                const annotationLayer = document.createElement('div');
+                annotationLayer.className = 'annotation-layer';
+                annotationLayer.id = `annotation-layer-${pageNum}`;
+                
+                // Append elements
+                pageContainer.appendChild(canvas);
+                pageContainer.appendChild(annotationLayer);
+                
+                // Add to viewer
+                const viewer = document.getElementById('pdf-viewer');
+                viewer.innerHTML = '';
+                viewer.appendChild(pageContainer);
+                
+                // Render PDF page
+                const renderContext = {
+                    canvasContext: context,
+                    viewport: viewport
+                };
+                
+                page.render(renderContext).promise.then(function() {
+                    console.log(`Page ${pageNum} rendered`);
+                });
+                
+                // Update current page display
+                document.getElementById('current-page').textContent = pageNum;
+                document.getElementById('page-selector').value = pageNum;
+                
+                return page;
+            });
+        }
+        
+        // Navigation handlers
+        document.getElementById('next-page').addEventListener('click', function() {
+            const currentPage = parseInt(document.getElementById('current-page').textContent);
+            const totalPages = parseInt(document.getElementById('total-pages').textContent);
+            
+            if (currentPage < totalPages) {
+                renderPage(window.pdfDoc, currentPage + 1);
+            }
+        });
+        
+        document.getElementById('prev-page').addEventListener('click', function() {
+            const currentPage = parseInt(document.getElementById('current-page').textContent);
+            
+            if (currentPage > 1) {
+                renderPage(window.pdfDoc, currentPage - 1);
+            }
+        });
+        
+        document.getElementById('next-bottom').addEventListener('click', function() {
+            document.getElementById('next-page').click();
+        });
+        
+        document.getElementById('prev-bottom').addEventListener('click', function() {
+            document.getElementById('prev-page').click();
+        });
+        
+        document.getElementById('go-to-page').addEventListener('click', function() {
+            const pageNum = parseInt(document.getElementById('page-selector').value);
+            const totalPages = parseInt(document.getElementById('total-pages').textContent);
+            
+            if (pageNum >= 1 && pageNum <= totalPages) {
+                renderPage(window.pdfDoc, pageNum);
+            } else {
+                document.getElementById('page-selector').value = parseInt(document.getElementById('current-page').textContent);
+            }
+        });
+        
+        // Zoom handlers
+        let zoomLevel = 100;
+        
+        document.getElementById('zoom-in').addEventListener('click', function() {
+            if (zoomLevel < 200) {
+                zoomLevel += 10;
+                updateZoom();
+            }
+        });
+        
+        document.getElementById('zoom-out').addEventListener('click', function() {
+            if (zoomLevel > 50) {
+                zoomLevel -= 10;
+                updateZoom();
+            }
+        });
+        
+        document.getElementById('fit-to-width').addEventListener('click', function() {
+            const viewerWidth = document.getElementById('pdf-viewer').clientWidth;
+            const canvas = document.querySelector('.page-canvas');
+            
+            if (canvas) {
+                const scale = viewerWidth / canvas.width;
+                zoomLevel = Math.floor(scale * 100);
+                updateZoom(scale);
+            }
+        });
+        
+        function updateZoom(scale) {
+            if (!scale) {
+                scale = zoomLevel / 100;
+            }
+            
+            const viewer = document.getElementById('pdf-viewer');
+            const pages = viewer.querySelectorAll('.page-container');
+            
+            pages.forEach(function(page) {
+                const canvas = page.querySelector('canvas');
+                if (canvas) {
+                    const originalWidth = canvas.width;
+                    const originalHeight = canvas.height;
+                    
+                    const newWidth = originalWidth * scale;
+                    const newHeight = originalHeight * scale;
+                    
+                    page.style.width = `${newWidth}px`;
+                    page.style.height = `${newHeight}px`;
+                    
+                    canvas.style.width = `${newWidth}px`;
+                    canvas.style.height = `${newHeight}px`;
+                    
+                    const annotationLayer = page.querySelector('.annotation-layer');
+                    if (annotationLayer) {
+                        annotationLayer.style.width = `${newWidth}px`;
+                        annotationLayer.style.height = `${newHeight}px`;
+                    }
+                }
+            });
+            
+            document.getElementById('zoom-level').textContent = `${zoomLevel}%`;
+        }
+        
+        // Sidebar toggle for mobile
+        document.getElementById('menu-btn').addEventListener('click', function() {
+            document.getElementById('sidebar').classList.add('open');
+            document.getElementById('sidebar-overlay').classList.add('open');
+        });
+        
+        document.getElementById('close-sidebar').addEventListener('click', function() {
+            document.getElementById('sidebar').classList.remove('open');
+            document.getElementById('sidebar-overlay').classList.remove('open');
+        });
+        
+        document.getElementById('sidebar-overlay').addEventListener('click', function() {
+            document.getElementById('sidebar').classList.remove('open');
+            this.classList.remove('open');
+        });
+        
+        document.getElementById('sidebar-toggle').addEventListener('click', function() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebar-overlay').classList.toggle('open');
+        });
+        
+        // Annotation tools
+        let selectedTool = null;
+        let isDrawing = false;
+        let startX, startY;
+        let currentAnnotation = null;
+        
+        document.querySelectorAll('[data-tool]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                selectedTool = this.getAttribute('data-tool');
+                document.querySelectorAll('[data-tool]').forEach(function(el) {
+                    el.classList.remove('bg-indigo-100', 'text-indigo-800');
+                });
+                this.classList.add('bg-indigo-100', 'text-indigo-800');
+                console.log('Selected tool:', selectedTool);
+            });
+        });
+        
+        // Handle canvas interaction for annotations
+        document.addEventListener('mousedown', function(e) {
+            if (selectedTool && e.target.classList.contains('annotation-layer')) {
+                isDrawing = true;
+                const annotationLayer = e.target;
+                const rect = annotationLayer.getBoundingClientRect();
+                
+                startX = e.clientX - rect.left;
+                startY = e.clientY - rect.top;
+                
+                currentAnnotation = document.createElement('div');
+                currentAnnotation.className = 'annotation';
+                
+                currentAnnotation.style.left = `${startX}px`;
+                currentAnnotation.style.top = `${startY}px`;
+                
+                switch (selectedTool) {
+                    case 'text':
+                        currentAnnotation.contentEditable = true;
+                        currentAnnotation.style.minWidth = '100px';
+                        currentAnnotation.style.minHeight = '30px';
+                        currentAnnotation.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
+                        currentAnnotation.style.color = 'black';
+                        currentAnnotation.style.padding = '5px';
+                        currentAnnotation.textContent = 'Double click to edit text';
+                        break;
+                        
+                    case 'highlight':
+                        currentAnnotation.style.backgroundColor = 'rgba(253, 224, 71, 0.4)';
+                        break;
+                        
+                    case 'rectangle':
+                        currentAnnotation.style.backgroundColor = 'rgba(219, 39, 119, 0.1)';
+                        break;
+                        
+                    case 'circle':
+                        currentAnnotation.style.borderRadius = '50%';
+                        currentAnnotation.style.backgroundColor = 'rgba(59, 130, 246, 0.2)';
+                        break;
+                }
+                
+                annotationLayer.appendChild(currentAnnotation);
+                
+                // Make annotation draggable
+                makeDraggable(currentAnnotation);
+            }
+        });
+        
+        document.addEventListener('mousemove', function(e) {
+            if (isDrawing && currentAnnotation && e.target.classList.contains('annotation-layer')) {
+                const annotationLayer = e.target;
+                const rect = annotationLayer.getBoundingClientRect();
+                
+                const currentX = e.clientX - rect.left;
+                const currentY = e.clientY - rect.top;
+                
+                const width = currentX - startX;
+                const height = currentY - startY;
+                
+                currentAnnotation.style.width = `${Math.abs(width)}px`;
+                currentAnnotation.style.height = `${Math.abs(height)}px`;
+                
+                if (width < 0) {
+                    currentAnnotation.style.left = `${currentX}px`;
+                }
+                
+                if (height < 0) {
+                    currentAnnotation.style.top = `${currentY}px`;
+                }
+            }
+        });
+        
+        document.addEventListener('mouseup', function() {
+            isDrawing = false;
+            if (currentAnnotation) {
+                // Remove if too small (accidental click)
+                const width = parseFloat(currentAnnotation.style.width);
+                const height = parseFloat(currentAnnotation.style.height);
+                
+                if (width < 5 || height < 5) {
+                    currentAnnotation.remove();
+                } else {
+                    currentAnnotation.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        document.querySelectorAll('.annotation').forEach(function(anno) {
+                            anno.classList.remove('active');
+                        });
+                        this.classList.add('active');
+                    });
+                    
+                    // Double click to edit text annotations
+                    if (selectedTool === 'text') {
+                        currentAnnotation.addEventListener('dblclick', function() {
+                            this.focus();
+                        });
+                    }
+                }
+                
+                currentAnnotation = null;
+            }
+        });
+        
+        function makeDraggable(element) {
+            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            
+            element.onmousedown = dragMouseDown;
+            
+            function dragMouseDown(e) {
+                e = e || window.event;
+                e.preventDefault();
+                
+                // Get the mouse cursor position at startup
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                
+                document.onmouseup = closeDragElement;
+                document.onmousemove = elementDrag;
+            }
+            
+            function elementDrag(e) {
+                e = e || window.event;
+                e.preventDefault();
+                
+                // Calculate the new cursor position
+                pos1 = pos3 - e.clientX;
+                pos2 = pos4 - e.clientY;
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                
+                // Set the element's new position
+                element.style.top = (element.offsetTop - pos2) + "px";
+                element.style.left = (element.offsetLeft - pos1) + "px";
+            }
+            
+            function closeDragElement() {
+                // Stop moving when mouse button is released
+                document.onmouseup = null;
+                document.onmousemove = null;
+            }
+        }
+        
+        // Sample PDF download (just for demo)
+        document.getElementById('download-pdf').addEventListener('click', function() {
+            alert('In a full implementation, this would download the modified PDF. This demo saves annotations in the browser only.');
+        });
+        
+        document.getElementById('print-pdf').addEventListener('click', function() {
+            window.print();
+        });
+    </script>
+</body>
+</html>
